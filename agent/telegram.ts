@@ -13,6 +13,12 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import { getChatIdByWallet } from "./bot-state";
+import {
+  startConversation,
+  handleConversationMessage,
+  startClaimConversation,
+} from "./bot-conversation";
 
 const OFFSET_FILE = path.join(__dirname, "telegram-offset.json");
 
@@ -30,6 +36,16 @@ function loadOffset(): number {
 
 function saveOffset(offset: number): void {
   fs.writeFileSync(OFFSET_FILE, JSON.stringify({ offset }));
+}
+
+/**
+ * Look up the Telegram chat_id for a given owner wallet.
+ * Falls back to TELEGRAM_CHAT_ID env var for single-user / legacy setups.
+ */
+export function resolveChatId(ownerWallet: string): string | null {
+  const fromDb = getChatIdByWallet(ownerWallet);
+  if (fromDb) return fromDb;
+  return process.env.TELEGRAM_CHAT_ID || null;
 }
 
 export async function sendWarning(
@@ -125,20 +141,43 @@ export async function processBotCommands(): Promise<void> {
       const chatId = update.message?.chat?.id;
       const text = (update.message?.text ?? "").trim();
 
-      if (chatId && (text === "/start" || text.startsWith("/start "))) {
+      if (!chatId) continue;
+
+      if (text === "/start" || text.startsWith("/start ")) {
+        const reply = await startConversation(String(chatId));
         await fetch(apiUrl("sendMessage"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text:
-              "🔐 *Dead Man's Switch* — connected\\!\n\n" +
-              "I'll warn you here before any switch executes\\. " +
-              "Reply with anything to reset the timer\\.",
-            parse_mode: "MarkdownV2",
-          }),
+          body: JSON.stringify({ chat_id: chatId, text: reply, parse_mode: "MarkdownV2" }),
         });
-        console.log(`[telegram] Greeted new user in chat ${chatId}`);
+        console.log(`[telegram] Started onboarding conversation for chat ${chatId}`);
+        continue;
+      }
+
+      if (text.startsWith("/claim ")) {
+        const code = text.slice(7).trim();
+        const reply = await startClaimConversation(String(chatId), code);
+        if (reply) {
+          await fetch(apiUrl("sendMessage"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, text: reply, parse_mode: "MarkdownV2" }),
+          });
+        }
+        continue;
+      }
+
+      // Try to route to an active conversation
+      const convReply = await handleConversationMessage(String(chatId), text);
+      if (convReply) {
+        // Internal signal for claim wallet — handled by agent caller
+        if (!convReply.startsWith("__CLAIM_WALLET__")) {
+          await fetch(apiUrl("sendMessage"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: chatId, text: convReply, parse_mode: "MarkdownV2" }),
+          });
+        }
       }
     }
 
@@ -166,7 +205,6 @@ export async function checkForAliveSignal(sinceMs: number): Promise<boolean> {
 
     for (const update of data.result) {
       offset = Math.max(offset, update.update_id + 1);
-      const chatId = update.message?.chat?.id;
       const text = update.message?.text ?? "";
       const msgDate = (update.message?.date ?? 0) * 1000;
 

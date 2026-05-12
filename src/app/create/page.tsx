@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
@@ -14,11 +15,13 @@ import {
   Loader2,
   Check,
   AlertCircle,
+  Link2,
 } from "lucide-react";
 import Link from "next/link";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { cn } from "@/lib/utils";
 import { useSwitches } from "@/lib/switches-store";
+import { resolveSolName } from "@/lib/sns";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 
@@ -72,19 +75,24 @@ function AnimatedCheckmark() {
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
 
-export default function CreateSwitchPage() {
+function CreateSwitchPageInner() {
   const { addSwitch } = useSwitches();
   const { connection } = useConnection();
   const { publicKey } = useWallet();
+  const searchParams = useSearchParams();
 
   const [switchTitle, setSwitchTitle] = useState("");
   const [days, setDays] = useState(90);
   const [demoMode, setDemoMode] = useState(false);
   const [beneficiaryAddress, setBeneficiaryAddress] = useState("");
   const [beneficiaryName, setBeneficiaryName] = useState("");
+  const [beneficiaryEmail, setBeneficiaryEmail] = useState("");
   const [amount, setAmount] = useState("5");
   const [telegramMode, setTelegramMode] = useState<"bot" | "manual" | null>(null);
   const [telegramHandle, setTelegramHandle] = useState("");
+  const [tgLinked, setTgLinked] = useState(false);
+  const [resolvedBeneficiaryAddress, setResolvedBeneficiaryAddress] = useState("");
+  const [solNameStatus, setSolNameStatus] = useState<"idle" | "resolving" | "resolved" | "error">("idle");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [txSignature, setTxSignature] = useState<string | null>(null);
@@ -98,10 +106,60 @@ export default function CreateSwitchPage() {
       .catch(() => setWalletBalance(null));
   }, [publicKey, connection]);
 
+  // Parse ?prefill= deep-link from Telegram bot
+  useEffect(() => {
+    const prefill = searchParams.get("prefill");
+    if (!prefill) return;
+    try {
+      const decoded = JSON.parse(Buffer.from(prefill, "base64url").toString("utf-8"));
+      if (decoded.graceDays) setDays(decoded.graceDays);
+      if (decoded.amountSol) setAmount(String(decoded.amountSol));
+      if (decoded.beneficiaryName) setBeneficiaryName(decoded.beneficiaryName);
+      if (decoded.beneficiaryEmail) setBeneficiaryEmail(decoded.beneficiaryEmail);
+      if (decoded.useCase) setSwitchTitle(decoded.useCase);
+      setTelegramMode("bot");
+    } catch { /* invalid prefill — ignore */ }
+  }, [searchParams]);
+
+  // Link Telegram once wallet is connected and tgCode is present
+  useEffect(() => {
+    const tgCode = searchParams.get("tgCode");
+    if (!tgCode || !publicKey || tgLinked) return;
+    fetch("/api/tg-auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tgCode, walletPubkey: publicKey.toBase58() }),
+    })
+      .then(r => r.json())
+      .then(d => { if (d.success) setTgLinked(true); })
+      .catch(() => {});
+  }, [publicKey, searchParams, tgLinked]);
+
+  const handleBeneficiaryBlur = useCallback(async () => {
+    const val = beneficiaryAddress.trim();
+    if (!val.toLowerCase().endsWith(".sol")) {
+      setResolvedBeneficiaryAddress(val);
+      setSolNameStatus("idle");
+      return;
+    }
+    setSolNameStatus("resolving");
+    const resolved = await resolveSolName(val);
+    if (resolved) {
+      setResolvedBeneficiaryAddress(resolved);
+      setSolNameStatus("resolved");
+    } else {
+      setResolvedBeneficiaryAddress("");
+      setSolNameStatus("error");
+    }
+  }, [beneficiaryAddress]);
+
   const parsedAmount = parseFloat(amount) || 0;
+  const effectiveBeneficiary = resolvedBeneficiaryAddress || beneficiaryAddress;
   const canSubmit =
     !!publicKey &&
-    beneficiaryAddress.trim().length > 0 &&
+    effectiveBeneficiary.trim().length > 0 &&
+    solNameStatus !== "resolving" &&
+    solNameStatus !== "error" &&
     parsedAmount > 0 &&
     !submitting;
 
@@ -116,8 +174,8 @@ export default function CreateSwitchPage() {
           (beneficiaryName
             ? `Transfer to ${beneficiaryName}`
             : `Switch ${Date.now().toString(36).slice(-4)}`),
-        beneficiaryName: beneficiaryName || "Unknown",
-        beneficiaryAddress,
+        beneficiaryName: beneficiaryName || (beneficiaryAddress.endsWith(".sol") ? beneficiaryAddress : "Unknown"),
+        beneficiaryAddress: effectiveBeneficiary,
         amount: parsedAmount,
         triggerDays: demoMode ? days / 1440 : days,
         telegramHandle: telegramMode === "manual" ? telegramHandle : undefined,
@@ -130,13 +188,15 @@ export default function CreateSwitchPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, addSwitch, switchTitle, beneficiaryName, beneficiaryAddress, parsedAmount, days, telegramMode, telegramHandle]);
+  }, [canSubmit, addSwitch, switchTitle, beneficiaryName, beneficiaryAddress, effectiveBeneficiary, parsedAmount, days, demoMode, telegramMode, telegramHandle]);
 
   const handleReset = useCallback(() => {
     setSwitchTitle("");
     setDays(90);
     setBeneficiaryAddress("");
     setBeneficiaryName("");
+    setResolvedBeneficiaryAddress("");
+    setSolNameStatus("idle");
     setAmount("5");
     setTelegramMode(null);
     setTelegramHandle("");
@@ -251,16 +311,44 @@ export default function CreateSwitchPage() {
                   <label className="text-sm font-semibold text-white mb-3 block">
                     Send my assets to
                   </label>
-                  <div className="glass flex items-center gap-3 px-4 py-3 rounded-xl focus-within:border-accent/40 transition-colors mb-3">
+                  <div className={cn(
+                    "glass flex items-center gap-3 px-4 py-3 rounded-xl focus-within:border-accent/40 transition-colors mb-1",
+                    solNameStatus === "error" && "border-danger/40"
+                  )}>
                     <Wallet className="w-4 h-4 text-muted shrink-0" />
                     <input
                       value={beneficiaryAddress}
-                      onChange={(e) => setBeneficiaryAddress(e.target.value)}
-                      placeholder="Enter Solana wallet address..."
+                      onChange={(e) => {
+                        setBeneficiaryAddress(e.target.value);
+                        if (solNameStatus !== "idle") {
+                          setSolNameStatus("idle");
+                          setResolvedBeneficiaryAddress("");
+                        }
+                      }}
+                      onBlur={handleBeneficiaryBlur}
+                      placeholder="Wallet address or .sol name"
                       className="flex-1 bg-transparent text-white text-sm font-mono placeholder-muted/50 focus:outline-none"
                     />
+                    {solNameStatus === "resolving" && (
+                      <Loader2 className="w-4 h-4 text-muted animate-spin shrink-0" />
+                    )}
+                    {solNameStatus === "resolved" && (
+                      <Check className="w-4 h-4 text-success shrink-0" />
+                    )}
+                    {solNameStatus === "error" && (
+                      <AlertCircle className="w-4 h-4 text-danger shrink-0" />
+                    )}
                   </div>
-                  <div className="glass flex items-center gap-3 px-4 py-3 rounded-xl focus-within:border-accent/40 transition-colors">
+                  {solNameStatus === "resolved" && (
+                    <p className="text-xs text-success mb-3 px-1">
+                      ✓ Resolves to {resolvedBeneficiaryAddress.slice(0, 6)}...{resolvedBeneficiaryAddress.slice(-4)}
+                    </p>
+                  )}
+                  {solNameStatus === "error" && (
+                    <p className="text-xs text-danger mb-3 px-1">Domain not found on Solana</p>
+                  )}
+                  {solNameStatus === "idle" && <div className="mb-3" />}
+                  <div className="glass flex items-center gap-3 px-4 py-3 rounded-xl focus-within:border-accent/40 transition-colors mb-3">
                     <AtSign className="w-4 h-4 text-muted shrink-0" />
                     <input
                       value={beneficiaryName}
@@ -269,6 +357,22 @@ export default function CreateSwitchPage() {
                       className="flex-1 bg-transparent text-white text-sm placeholder-muted/50 focus:outline-none"
                     />
                   </div>
+                  <div className="glass flex items-center gap-3 px-4 py-3 rounded-xl focus-within:border-accent/40 transition-colors">
+                    <span className="text-muted text-xs shrink-0">@</span>
+                    <input
+                      value={beneficiaryEmail}
+                      onChange={(e) => setBeneficiaryEmail(e.target.value)}
+                      placeholder="Beneficiary email (for claim notification)"
+                      type="email"
+                      className="flex-1 bg-transparent text-white text-sm placeholder-muted/50 focus:outline-none"
+                    />
+                  </div>
+                  {tgLinked && (
+                    <div className="flex items-center gap-2 mt-3 text-xs text-[#14F195]">
+                      <Link2 className="w-3.5 h-3.5" />
+                      Telegram linked — you&apos;ll receive alerts in the bot.
+                    </div>
+                  )}
                 </div>
 
                 {/* Divider */}
@@ -400,10 +504,12 @@ export default function CreateSwitchPage() {
                     </span>{" "}
                     will automatically transfer to{" "}
                     <span className="text-white font-semibold">
-                      {beneficiaryName || beneficiaryAddress.slice(0, 8) || "..."}
-                      {beneficiaryAddress && !beneficiaryName && beneficiaryAddress.length > 8
-                        ? `...${beneficiaryAddress.slice(-4)}`
-                        : ""}
+                      {beneficiaryName ||
+                        (beneficiaryAddress.toLowerCase().endsWith(".sol")
+                          ? beneficiaryAddress
+                          : beneficiaryAddress
+                          ? `${beneficiaryAddress.slice(0, 6)}...${beneficiaryAddress.slice(-4)}`
+                          : "...")}
                     </span>
                     .
                   </p>
@@ -487,7 +593,7 @@ export default function CreateSwitchPage() {
 
               {txSignature && (
                 <motion.div
-                  className="glass px-5 py-3 rounded-xl mb-10 inline-flex items-center gap-2"
+                  className="glass px-5 py-3 rounded-xl mb-6 inline-flex items-center gap-2"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 1.6 }}
@@ -531,5 +637,13 @@ export default function CreateSwitchPage() {
         </AnimatePresence>
       </div>
     </DashboardLayout>
+  );
+}
+
+export default function CreateSwitchPage() {
+  return (
+    <Suspense>
+      <CreateSwitchPageInner />
+    </Suspense>
   );
 }

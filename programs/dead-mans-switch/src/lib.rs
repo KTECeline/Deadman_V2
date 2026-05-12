@@ -7,7 +7,7 @@ pub mod state;
 use instructions::*;
 
 // Placeholder ID — run `anchor keys sync` after `anchor build` to update this automatically
-declare_id!("5VTjU3UxdPuXCgEes3BZHKU1AXYCnTU2YFF5LdWqTXJx");
+declare_id!("E1iZrmw5sykSVijJ91bzV7z9dLtGR9j7sSWbbYUPe18F");
 
 #[program]
 pub mod dead_mans_switch {
@@ -42,5 +42,13 @@ pub mod dead_mans_switch {
 
     pub fn heartbeat(ctx: Context<Heartbeat>, switch_id: u64, activity_type: String) -> Result<()> {
         instructions::heartbeat::handler(ctx, switch_id, activity_type)
+    }
+
+    pub fn execute_to_vault(ctx: Context<ExecuteToVault>, switch_id: u64) -> Result<()> {
+        instructions::execute_to_vault::handler(ctx, switch_id)
+    }
+
+    pub fn claim_beneficiary(ctx: Context<ClaimBeneficiary>, switch_id: u64) -> Result<()> {
+        instructions::claim_beneficiary::handler(ctx, switch_id)
     }
 }

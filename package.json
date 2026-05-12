@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:all": "concurrently --names \"web,agent\" --prefix-colors \"cyan,magenta\" \"next dev\" \"ts-node -P tsconfig.agent.json agent/index.ts\"",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -15,6 +16,8 @@
     "tg:chatid": "ts-node -P tsconfig.agent.json agent/get-telegram-chatid.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.2",
+    "@bonfida/spl-name-service": "^3.0.21",
     "@coral-xyz/anchor": "^0.31.1",
     "@metaplex-foundation/mpl-bubblegum": "^1.0.1",
     "@metaplex-foundation/umi": "^0.8.10",
@@ -25,14 +28,18 @@
     "@solana/wallet-adapter-react": "^0.15.39",
     "@solana/wallet-adapter-react-ui": "^0.9.39",
     "@solana/web3.js": "^1.98.4",
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.9.0",
     "clsx": "^2.1.1",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
     "framer-motion": "^11.18.2",
+    "groq-sdk": "^1.2.0",
     "lucide-react": "^1.14.0",
     "next": "14.2.35",
     "react": "^18",
     "react-dom": "^18",
+    "resend": "^6.12.3",
     "tailwind-merge": "^3.5.0",
     "ws": "^8.17.0"
   },
@@ -47,6 +54,7 @@
     "@types/react-dom": "^18",
     "@types/ws": "^8.5.10",
     "chai": "^4.3.4",
+    "concurrently": "^9.2.1",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "mocha": "^9.0.3",

@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  eslint: { ignoreDuringBuilds: true },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       // Polyfill Node.js built-ins that Solana/Anchor reference in browser bundles

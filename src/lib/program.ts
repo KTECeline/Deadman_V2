@@ -7,7 +7,7 @@ import { PublicKey } from "@solana/web3.js";
 import idl from "../idl/dead_mans_switch.json";
 
 export const PROGRAM_ID = new PublicKey(
-  "5VTjU3UxdPuXCgEes3BZHKU1AXYCnTU2YFF5LdWqTXJx"
+  process.env.NEXT_PUBLIC_PROGRAM_ID ?? "E1iZrmw5sykSVijJ91bzV7z9dLtGR9j7sSWbbYUPe18F"
 );
 
 export function useProgram() {

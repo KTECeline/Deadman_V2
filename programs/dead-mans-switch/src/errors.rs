@@ -16,4 +16,12 @@ pub enum SwitchError {
     CnftAlreadyLinked,
     #[msg("Activity type label must be 32 bytes or fewer")]
     ActivityTypeTooLong,
+    #[msg("Switch has already been executed")]
+    AlreadyExecuted,
+    #[msg("Beneficiary is already set — use execute instead")]
+    BeneficiaryAlreadySet,
+    #[msg("Switch has not been executed yet")]
+    NotExecuted,
+    #[msg("Only the watcher can call this instruction")]
+    NotWatcher,
 }

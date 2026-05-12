@@ -1,5 +1,5 @@
 {
-  "address": "5VTjU3UxdPuXCgEes3BZHKU1AXYCnTU2YFF5LdWqTXJx",
+  "address": "E1iZrmw5sykSVijJ91bzV7z9dLtGR9j7sSWbbYUPe18F",
   "metadata": {
     "name": "dead_mans_switch",
     "version": "0.1.0",
@@ -113,6 +113,71 @@
           "relations": [
             "switch"
           ]
+        }
+      ],
+      "args": [
+        {
+          "name": "switch_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_beneficiary",
+      "discriminator": [
+        62,
+        153,
+        117,
+        236,
+        219,
+        250,
+        133,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "switch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  119,
+                  105,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "switch.owner",
+                "account": "Switch"
+              },
+              {
+                "kind": "arg",
+                "path": "switch_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "beneficiary",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "writable": true
+        },
+        {
+          "name": "watcher",
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -257,6 +322,59 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "switch_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "execute_to_vault",
+      "discriminator": [
+        191,
+        223,
+        236,
+        88,
+        79,
+        127,
+        241,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "switch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  119,
+                  105,
+                  116,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "switch.owner",
+                "account": "Switch"
+              },
+              {
+                "kind": "arg",
+                "path": "switch_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "caller",
+          "signer": true
         }
       ],
       "args": [
@@ -436,6 +554,26 @@
       "code": 6006,
       "name": "ActivityTypeTooLong",
       "msg": "Activity type label must be 32 bytes or fewer"
+    },
+    {
+      "code": 6007,
+      "name": "AlreadyExecuted",
+      "msg": "Switch has already been executed"
+    },
+    {
+      "code": 6008,
+      "name": "BeneficiaryAlreadySet",
+      "msg": "Beneficiary is already set — use execute instead"
+    },
+    {
+      "code": 6009,
+      "name": "NotExecuted",
+      "msg": "Switch has not been executed yet"
+    },
+    {
+      "code": 6010,
+      "name": "NotWatcher",
+      "msg": "Only the watcher can call this instruction"
     }
   ],
   "types": [
@@ -488,6 +626,10 @@
                 32
               ]
             }
+          },
+          {
+            "name": "is_executed",
+            "type": "bool"
           }
         ]
       }

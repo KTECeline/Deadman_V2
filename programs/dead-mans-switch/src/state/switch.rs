@@ -13,6 +13,7 @@ pub struct Switch {
     pub cnft_asset_id: Pubkey,  // 32 — cNFT asset ID (Pubkey::default if not yet linked)
     pub watcher: Pubkey,        // 32 — agent authorized to call heartbeat on behalf of owner
     pub last_activity_type: [u8; 32], // 32 — last heartbeat activity label (e.g. "dex_swap")
+    pub is_executed: bool,            // 1  — set when execute_to_vault fires (unset beneficiary flow)
 }
 
 impl Switch {
@@ -26,5 +27,6 @@ impl Switch {
         + 1    // bump
         + 32   // cnft_asset_id
         + 32   // watcher
-        + 32;  // last_activity_type
+        + 32   // last_activity_type
+        + 1;   // is_executed
 }

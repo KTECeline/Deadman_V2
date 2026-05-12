@@ -5,10 +5,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-dead_mans_switch = "5VTjU3UxdPuXCgEes3BZHKU1AXYCnTU2YFF5LdWqTXJx"
+dead_mans_switch = "E1iZrmw5sykSVijJ91bzV7z9dLtGR9j7sSWbbYUPe18F"
 
 [programs.localnet]
-dead_mans_switch = "5VTjU3UxdPuXCgEes3BZHKU1AXYCnTU2YFF5LdWqTXJx"
+dead_mans_switch = "E1iZrmw5sykSVijJ91bzV7z9dLtGR9j7sSWbbYUPe18F"
 
 [registry]
 url = "https://api.apr.dev"

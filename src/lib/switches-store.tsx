@@ -19,6 +19,7 @@ import {
   getBeneficiaryName,
   setBeneficiaryName,
 } from "@/lib/switch-names";
+import { lookupSolName } from "@/lib/sns";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -226,9 +227,23 @@ export function SwitchesProvider({ children }: { children: ReactNode }) {
         },
       ]);
 
-      const data = accounts
+      const raw = accounts
         .map(({ account, publicKey }) => toSwitchData(account, publicKey))
         .sort((a, b) => b.id - a.id);
+
+      // Enrich with .sol names where no manual name is stored
+      const data = await Promise.all(
+        raw.map(async (sw) => {
+          const stored = getBeneficiaryName(sw.beneficiaryAddress, "");
+          if (stored) return sw;
+          const solName = await lookupSolName(sw.beneficiaryAddress);
+          if (solName) {
+            setBeneficiaryName(sw.beneficiaryAddress, solName);
+            return { ...sw, beneficiaryName: solName, beneficiaryShort: solName };
+          }
+          return sw;
+        })
+      );
 
       setSwitches(data);
       setGlobalActivity(

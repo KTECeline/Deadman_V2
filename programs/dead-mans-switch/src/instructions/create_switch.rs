@@ -45,6 +45,7 @@ pub fn handler(
     switch.cnft_asset_id = Pubkey::default(); // set after minting via link_cnft
     switch.watcher = watcher;
     switch.last_activity_type = [0u8; 32];
+    switch.is_executed = false;
 
     // Transfer locked_amount from owner into the switch account.
     // system_program::transfer can send to any account (including program-owned PDAs)

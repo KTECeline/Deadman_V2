@@ -33,8 +33,10 @@ export interface SwitchNftParams {
   switchPda: string;
   owner: string;
   beneficiary: string;
-  checkInInterval: number; // seconds
-  createdAt: number;       // unix timestamp
+  beneficiaryEmail?: string; // stored on-chain in cNFT URI — agent reads this on execution
+  beneficiaryName?: string;
+  checkInInterval: number;   // seconds
+  createdAt: number;         // unix timestamp
 }
 
 function buildMetadataUri(params: SwitchNftParams): string {
@@ -47,12 +49,17 @@ function buildMetadataUri(params: SwitchNftParams): string {
       { trait_type: "Switch ID",                value: params.switchId.toString() },
       { trait_type: "PDA Address",              value: params.switchPda },
       { trait_type: "Beneficiary",              value: params.beneficiary },
+      { trait_type: "Beneficiary Email",        value: params.beneficiaryEmail ?? "" },
+      { trait_type: "Beneficiary Name",         value: params.beneficiaryName ?? "" },
       { trait_type: "Check-in Interval (sec)",  value: params.checkInInterval },
       { trait_type: "Trigger Type",             value: "time-based" },
       { trait_type: "Created At",               value: new Date(params.createdAt * 1000).toISOString() },
     ],
     properties: {
       category: "utility",
+      // beneficiary_email stored here for agent to read on execution
+      beneficiary_email: params.beneficiaryEmail ?? "",
+      beneficiary_name: params.beneficiaryName ?? "",
     },
   };
 

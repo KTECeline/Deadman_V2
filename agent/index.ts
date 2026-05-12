@@ -22,15 +22,17 @@ import { loadProgram } from "./program";
 import { startHeartbeatMonitor } from "./monitor";
 import { evaluateTimeCondition, formatDeadline } from "./conditions";
 import { executeSwitch, recordHeartbeat } from "./executor";
-import { fetchPrice } from "./pyth-oracle";
-import { paymentLogs } from "./x402-client";
 import {
   sendWarning,
   sendExecutionNotice,
   sendResetConfirmation,
   checkForAliveSignal,
   processBotCommands,
+  resolveChatId,
 } from "./telegram";
+import { createClaimCode } from "./bot-state";
+import { sendClaimEmail } from "./email";
+import { lookupSolName, resolveSolName } from "./sns";
 import {
   startGracePeriod,
   getGracePeriod,
@@ -45,7 +47,6 @@ const GRACE_PERIOD_MS =
   parseInt(process.env.GRACE_PERIOD_SECONDS ?? "604800") * 1000;
 const GRACE_PERIOD_DAYS = Math.round(GRACE_PERIOD_MS / 86_400_000) || 1;
 
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID ?? "";
 
 // ── Agent keypair (the authorized watcher) ──────────────────────────────────
 function loadAgentKeypair(): Keypair {
@@ -103,56 +104,55 @@ async function runConditionLoop(
     const result = evaluateTimeCondition(sw);
     console.log(`[agent] Switch ${sw.switchId}: ${result.reason}`);
 
-    // Fetch SOL price via x402 — agent pays per query from its own wallet
-    try {
-      const priceData = await fetchPrice("SOL-USD", agentKeypair);
-      console.log(
-        `[x402]  SOL/USD = $${priceData.price.toFixed(2)} ` +
-        `(paid ${priceData.costLamports} lamports, tx: ${priceData.paidWith.slice(0, 16)}...)`
-      );
-      console.log(`[x402]  Total payments this session: ${paymentLogs.length}`);
-    } catch (err: any) {
-      console.log(`[x402]  Oracle unavailable (${err.message}) — start x402/server.ts for price data`);
-    }
-
     if (result.shouldExecute) {
       const grace = getGracePeriod(sw.switchId);
+      const chatId = resolveChatId(sw.owner.toBase58());
 
       if (!grace) {
-        // First expiry — send warning and start grace period instead of executing
-        if (TELEGRAM_CHAT_ID) {
-          await sendWarning(TELEGRAM_CHAT_ID, sw.switchId, GRACE_PERIOD_DAYS);
-        }
-        startGracePeriod(sw.switchId, TELEGRAM_CHAT_ID);
+        // First expiry — send warning and start grace period
+        if (chatId) await sendWarning(chatId, sw.switchId, GRACE_PERIOD_DAYS);
+        startGracePeriod(sw.switchId, chatId ?? "");
         console.log(
           `[agent] ⚠️  Switch ${sw.switchId} expired — grace period started ` +
           `(${GRACE_PERIOD_DAYS}d). Telegram warning sent.`
         );
       } else if (isGraceExpired(grace, GRACE_PERIOD_MS)) {
-        // Grace period over with no reply — execute
+        // Grace period over — execute
         console.log(`[agent] 🔴 Executing switch ${sw.switchId} (grace period elapsed)...`);
         try {
           const sig = await executeSwitch(sw, agentKeypair);
           executedSwitches.add(key);
-          if (TELEGRAM_CHAT_ID) {
-            await sendExecutionNotice(TELEGRAM_CHAT_ID, sw.switchId, sig, sw.lockedAmount);
-          }
+          if (chatId) await sendExecutionNotice(chatId, sw.switchId, sig, sw.lockedAmount);
           clearGracePeriod(sw.switchId);
           console.log(`[agent] ✅ Switch ${sw.switchId} executed. Sig: ${sig}`);
-          console.log(`[agent]    ${sw.lockedAmount} lamports → ${sw.beneficiary.toBase58()}`);
+
+          // If beneficiary had no wallet, read email from cNFT URI and send claim email
+          const beneficiaryIsUnset =
+            sw.beneficiary.toBase58() === anchor.web3.PublicKey.default.toBase58();
+          if (beneficiaryIsUnset && process.env.RESEND_API_KEY) {
+            const beneficiaryEmail = await readEmailFromCnft(sw.cnftAssetId.toBase58());
+            if (beneficiaryEmail) {
+              const claimCode = createClaimCode(sw.switchId.toString(), beneficiaryEmail);
+              await sendClaimEmail(
+                beneficiaryEmail,
+                sw.owner.toBase58().slice(0, 8),
+                Number(sw.lockedAmount) / 1e9,
+                claimCode
+              );
+              console.log(`[agent] 📧 Claim email sent to ${beneficiaryEmail}`);
+            }
+          }
         } catch (err: any) {
           console.error(`[agent] ❌ Execute failed for switch ${sw.switchId}:`, err.message);
         }
       } else {
-        // Inside grace period — check if user replied on Telegram
+        // Inside grace period — check for Telegram alive signal
         const aliveSignal = await checkForAliveSignal(grace.startedAt);
         if (aliveSignal) {
           try {
             await recordHeartbeat(sw, "telegram_reply", agentKeypair);
             clearGracePeriod(sw.switchId);
-            if (TELEGRAM_CHAT_ID) {
-              await sendResetConfirmation(TELEGRAM_CHAT_ID, sw.switchId);
-            }
+            if (chatId) await sendResetConfirmation(chatId, sw.switchId);
             console.log(`[agent] ✅ Switch ${sw.switchId} — alive signal received, timer reset.`);
           } catch (err: any) {
             console.error(`[agent] ❌ Heartbeat failed for switch ${sw.switchId}:`, err.message);
@@ -173,6 +173,38 @@ async function runConditionLoop(
   }
 }
 
+// ── Read beneficiary email from cNFT on-chain metadata ───────────────────────
+async function readEmailFromCnft(assetId: string): Promise<string | null> {
+  if (!assetId || assetId === anchor.web3.PublicKey.default.toBase58()) return null;
+  try {
+    const heliusUrl = `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`;
+    const res = await fetch(heliusUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: "get-asset", method: "getAsset",
+        params: { id: assetId },
+      }),
+    });
+    const json = await res.json();
+    const uri: string = json?.result?.content?.json_uri ?? "";
+    if (!uri) return null;
+
+    // URI is a data: base64 blob we encoded ourselves
+    if (uri.startsWith("data:application/json;base64,")) {
+      const decoded = JSON.parse(Buffer.from(uri.slice(29), "base64").toString("utf-8"));
+      return decoded?.properties?.beneficiary_email || null;
+    }
+
+    // Or a real https URI
+    const metaRes = await fetch(uri);
+    const meta = await metaRes.json();
+    return meta?.properties?.beneficiary_email || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
   console.log("🔐 Dead Man's Switch Agent starting...");
@@ -184,9 +216,25 @@ async function main() {
 
   const agentKeypair = loadAgentKeypair();
   const program = loadProgram(agentKeypair);
+  const connection = program.provider.connection;
 
   console.log(`[agent] Wallet: ${agentKeypair.publicKey.toBase58()}`);
   console.log(`[agent] Program: ${program.programId.toBase58()}`);
+
+  // Resolve agent .sol identity
+  const agentDomain = await lookupSolName(agentKeypair.publicKey, connection);
+  if (agentDomain) {
+    console.log(`[agent] Identity: ${agentDomain} (${agentKeypair.publicKey.toBase58()})`);
+  } else if (process.env.AGENT_SOL_NAME) {
+    const resolved = await resolveSolName(process.env.AGENT_SOL_NAME, connection);
+    if (resolved?.toBase58() === agentKeypair.publicKey.toBase58()) {
+      console.log(`[agent] Identity: ${process.env.AGENT_SOL_NAME} ✓`);
+    } else {
+      console.log(`[agent] Identity: ${agentKeypair.publicKey.toBase58()} (no .sol domain yet)`);
+    }
+  } else {
+    console.log(`[agent] Identity: ${agentKeypair.publicKey.toBase58()} (no .sol domain yet)`);
+  }
 
   // Fetch initial switches and start a websocket monitor for each
   const switches = await fetchActiveSwitches(program);

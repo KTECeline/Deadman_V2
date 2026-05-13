@@ -1,12 +1,6 @@
 {
-  "$schema": "https://schema.railpack.com",
   "provider": "node",
-  "steps": {
-    "install": {
-      "commands": ["npm install --include=dev"]
-    }
-  },
-  "deploy": {
-    "startCommand": "npx ts-node -P tsconfig.agent.json agent/index.ts"
+  "start": {
+    "cmd": "npx ts-node --project tsconfig.agent.json agent/index.ts"
   }
 }

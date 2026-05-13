@@ -1,0 +1,6 @@
+{
+  "provider": "node",
+  "start": {
+    "cmd": "node -r ts-node/register -P tsconfig.agent.json agent/index.ts"
+  }
+}

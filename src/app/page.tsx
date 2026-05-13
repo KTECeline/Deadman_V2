@@ -249,12 +249,22 @@ function Navbar() {
               {telegramConnected ? <Check className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
               {telegramConnected ? "Telegram Connected" : "Connect Telegram"}
             </button>
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-solana-gradient text-sm font-semibold text-white transition-transform hover:scale-105 active:scale-95"
-            >
-              Launch App
-            </Link>
+            {connected ? (
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-solana-gradient text-sm font-semibold text-white transition-transform hover:scale-105 active:scale-95"
+              >
+                Launch App
+              </Link>
+            ) : (
+              <button
+                onClick={() => setVisible(true)}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-solana-gradient text-sm font-semibold text-white transition-transform hover:scale-105 active:scale-95"
+              >
+                <Wallet className="w-4 h-4" />
+                Connect Wallet
+              </button>
+            )}
           </div>
         </div>
       </nav>
@@ -286,6 +296,8 @@ function Hero() {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true });
   const { switches } = useSwitches();
+  const { connected } = useWallet();
+  const { setVisible } = useWalletModal();
   const [cycle, setCycle] = useState(0);
 
   useEffect(() => {
@@ -329,13 +341,23 @@ function Hero() {
         </motion.p>
 
         <motion.div variants={fadeUp} custom={2} className="mt-10">
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center gap-2.5 px-8 py-4 rounded-full bg-solana-gradient text-lg font-semibold text-white transition-transform hover:scale-105 active:scale-95 shadow-lg shadow-accent/20"
-          >
-            Go to Dashboard
-            <ChevronRight className="w-5 h-5" />
-          </Link>
+          {connected ? (
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2.5 px-8 py-4 rounded-full bg-solana-gradient text-lg font-semibold text-white transition-transform hover:scale-105 active:scale-95 shadow-lg shadow-accent/20"
+            >
+              Go to Dashboard
+              <ChevronRight className="w-5 h-5" />
+            </Link>
+          ) : (
+            <button
+              onClick={() => setVisible(true)}
+              className="inline-flex items-center gap-2.5 px-8 py-4 rounded-full bg-solana-gradient text-lg font-semibold text-white transition-transform hover:scale-105 active:scale-95 shadow-lg shadow-accent/20"
+            >
+              <Wallet className="w-5 h-5" />
+              Connect Wallet
+            </button>
+          )}
         </motion.div>
 
         <motion.div

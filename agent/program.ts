@@ -15,7 +15,7 @@ export function loadProgram(keypair: Keypair): anchor.Program {
   );
   const idl = JSON.parse(
     fs.readFileSync(
-      path.join(__dirname, "../target/idl/dead_mans_switch.json"),
+      path.join(process.cwd(), "src/idl/dead_mans_switch.json"),
       "utf-8"
     )
   );

@@ -1,9 +1,7 @@
 {
-  "provider": "node",
-  "build": {
-    "cmd": "npm ci"
-  },
-  "start": {
-    "cmd": "npx ts-node --project tsconfig.agent.json agent/index.ts"
+  "$schema": "https://railway.app/railway.schema.json",
+  "deploy": {
+    "startCommand": "npx ts-node -P tsconfig.agent.json agent/index.ts",
+    "restartPolicyType": "ON_FAILURE"
   }
 }

@@ -405,6 +405,19 @@ export function SwitchesProvider({ children }: { children: ReactNode }) {
       ]);
 
       await fetchSwitches();
+
+      if (input.beneficiaryEmail) {
+        await fetch("/api/register-switch-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            switchId: switchId.toNumber(),
+            beneficiaryEmail: input.beneficiaryEmail,
+            beneficiaryName: input.beneficiaryName,
+          }),
+        });
+      }
+
       return { sig: tx, switchId: switchId.toNumber() };
     },
     [program, wallet.publicKey, fetchSwitches]

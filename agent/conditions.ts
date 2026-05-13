@@ -10,10 +10,7 @@ export interface ConditionResult {
 export function evaluateTimeCondition(account: SwitchAccount): ConditionResult {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const elapsedSeconds = nowSeconds - account.lastCheckIn;
-  // DEMO_TRIGGER_SECONDS overrides the on-chain interval for quick demos
-  const effectiveInterval = process.env.DEMO_TRIGGER_SECONDS
-    ? parseInt(process.env.DEMO_TRIGGER_SECONDS)
-    : account.checkInInterval;
+  const effectiveInterval = account.checkInInterval;
   const remainingSeconds = effectiveInterval - elapsedSeconds;
   const shouldExecute = elapsedSeconds >= effectiveInterval;
 

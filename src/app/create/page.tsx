@@ -161,16 +161,6 @@ function CreateSwitchPageInner() {
         beneficiaryEmail: beneficiaryEmail || undefined,
       });
       setTxSignature(sig);
-
-      // Register beneficiary email so agent can notify on execution
-      if (beneficiaryEmail) {
-        fetch("/api/register-switch-email", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ switchId, beneficiaryEmail, beneficiaryName }),
-        }).catch(() => {});
-      }
-
       setSuccess(true);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Transaction failed. Please try again.";

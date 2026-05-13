@@ -52,7 +52,9 @@ export function startHeartbeatMonitor(
 
   ws.on("message", async (raw: WebSocket.Data) => {
     try {
-      const msg = JSON.parse(raw.toString());
+      const text = raw.toString();
+      if (!text.startsWith("{")) return; // ignore plain-text connection state messages
+      const msg = JSON.parse(text);
 
       // Skip subscription confirmation messages
       if (!msg.params?.result?.value) return;

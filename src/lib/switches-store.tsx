@@ -67,6 +67,7 @@ export interface NewSwitchInput {
   amount: number;
   triggerDays: number;
   telegramHandle?: string;
+  beneficiaryEmail?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -193,9 +194,41 @@ export function useSwitches() {
 /*  Provider                                                            */
 /* ------------------------------------------------------------------ */
 
+const DEMO_SWITCHES: SwitchData[] = [
+  {
+    id: 99,
+    pda: "demo_triggered_99",
+    title: "Emergency Fund to Sarah",
+    beneficiaryName: "Sarah",
+    beneficiaryAddress: "7xK3mPFq8VbNzR4tJkYdW9sGhL2cXeUfHnA5vQ1f9Qm",
+    beneficiaryShort: "7xK3...f9Qm",
+    amount: 0.05,
+    amountLabel: "0.05 SOL",
+    triggerCondition: "10 seconds of inactivity",
+    triggerDays: 0,
+    status: "executed",
+    daysRemaining: 0,
+    lastCheckIn: "91 days ago",
+    createdAt: "120 days ago",
+    timeline: [
+      { label: "Switch Created", detail: "120 days ago", completed: true },
+      { label: "Vault Funded", detail: "0.05 SOL deposited", completed: true },
+      { label: "Last Check-in", detail: "91 days ago — dex_swap", completed: true },
+      { label: "Trigger", detail: "Triggered", completed: true },
+      { label: "Execution", detail: "Executed — funds sent to beneficiary", completed: true },
+    ],
+    activity: [
+      { text: "Switch executed — 0.05 SOL sent to Sarah", time: "Just now" },
+      { text: "Trigger conditions met — 90 days inactive", time: "1 day ago" },
+      { text: "Heartbeat: dex_swap", time: "91 days ago" },
+      { text: "Switch created on-chain", time: "120 days ago" },
+    ],
+  },
+];
+
 export function SwitchesProvider({ children }: { children: ReactNode }) {
   const { program, wallet } = useProgram();
-  const [switches, setSwitches] = useState<SwitchData[]>([]);
+  const [switches, setSwitches] = useState<SwitchData[]>(DEMO_SWITCHES);
   const [globalActivity, setGlobalActivity] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [telegramConnected, setTelegramConnected] = useState(false);
@@ -209,8 +242,7 @@ export function SwitchesProvider({ children }: { children: ReactNode }) {
   /* ---- fetch all Switch PDAs for connected wallet ---- */
   const fetchSwitches = useCallback(async (): Promise<void> => {
     if (!program || !wallet.publicKey) {
-      setSwitches([]);
-      setGlobalActivity([]);
+      setSwitches((prev) => prev.length === 0 ? DEMO_SWITCHES : prev);
       return;
     }
     setLoading(true);
@@ -254,12 +286,80 @@ export function SwitchesProvider({ children }: { children: ReactNode }) {
     fetchSwitches();
   }, [fetchSwitches]);
 
-  /* ---- addSwitch — calls createSwitch on-chain ---- */
+  /* ---- addSwitch — calls createSwitch on-chain, or creates mock if no wallet ---- */
   const addSwitch = useCallback(
     async (input: NewSwitchInput): Promise<{ sig: string; switchId: number }> => {
-      if (!program || !wallet.publicKey)
-        throw new Error("Wallet not connected");
+      /* ---- Mock mode: no wallet connected — auto-execute & generate claim code ---- */
+      if (!program || !wallet.publicKey) {
+        const mockId = Math.floor(Math.random() * 2 ** 32);
+        const mockPda = `mock_${mockId}`;
+        const title = input.title || `Switch #${mockId}`;
 
+        const mockSwitch: SwitchData = {
+          id: mockId,
+          pda: mockPda,
+          title,
+          beneficiaryName: input.beneficiaryName || shorten(input.beneficiaryAddress),
+          beneficiaryAddress: input.beneficiaryAddress,
+          beneficiaryShort: shorten(input.beneficiaryAddress),
+          amount: input.amount,
+          amountLabel: `${input.amount} SOL`,
+          triggerCondition: "Triggered (demo)",
+          triggerDays: 0,
+          status: "executed",
+          daysRemaining: 0,
+          lastCheckIn: "Just now",
+          createdAt: "Just now",
+          timeline: [
+            { label: "Switch Created", detail: "Demo mode", completed: true },
+            { label: "Vault Funded", detail: `${input.amount} SOL deposited`, completed: true },
+            { label: "Last Check-in", detail: "Just now", completed: true },
+            { label: "Trigger", detail: "Triggered", completed: true },
+            { label: "Execution", detail: "Executed — awaiting beneficiary claim", completed: true },
+          ],
+          activity: [
+            { text: `Switch executed — ${input.amount} SOL awaiting claim`, time: "Just now" },
+            { text: "Trigger conditions met (demo)", time: "Just now" },
+            { text: "Switch created (demo mode)", time: "Just now" },
+          ],
+        };
+
+        setSwitchTitle(mockPda, title);
+        if (input.beneficiaryName) {
+          setBeneficiaryName(input.beneficiaryAddress, input.beneficiaryName);
+        }
+
+        setSwitches((prev) => [mockSwitch, ...prev]);
+        setGlobalActivity((prev) => [
+          { text: `${title} executed (demo)`, time: "Just now", icon: "check" as const, color: "text-success" },
+          ...prev,
+        ]);
+
+        // Generate claim code via API
+        try {
+          const res = await fetch("/api/demo-claim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              switchId: mockId,
+              amount: input.amount,
+              beneficiaryEmail: input.beneficiaryEmail || "",
+              beneficiaryName: input.beneficiaryName || "Beneficiary",
+              ownerName: input.title || "Someone",
+            }),
+          });
+          const data = await res.json();
+          if (data.claimUrl) {
+            return { sig: `demo_claim:${data.code}`, switchId: mockId };
+          }
+        } catch {
+          // Non-fatal
+        }
+
+        return { sig: `mock_tx_${mockId}`, switchId: mockId };
+      }
+
+      /* ---- Real on-chain mode ---- */
       const switchId = new anchor.BN(Math.floor(Math.random() * 2 ** 32));
       // NEXT_PUBLIC_DEMO_TRIGGER_SECONDS overrides on-chain interval for live demos
       const demoSecs = process.env.NEXT_PUBLIC_DEMO_TRIGGER_SECONDS

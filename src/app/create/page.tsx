@@ -156,8 +156,9 @@ function CreateSwitchPageInner() {
         beneficiaryName: beneficiaryName || "Unknown",
         beneficiaryAddress,
         amount: parsedAmount,
-        triggerDays: demoMode ? days / 1440 : days,
+        triggerDays: demoMode ? days / 86400 : days,
         telegramHandle: telegramMode === "manual" ? telegramHandle : undefined,
+        beneficiaryEmail: beneficiaryEmail || undefined,
       });
       setTxSignature(sig);
 
@@ -177,7 +178,7 @@ function CreateSwitchPageInner() {
     } finally {
       setSubmitting(false);
     }
-  }, [canSubmit, addSwitch, switchTitle, beneficiaryName, beneficiaryAddress, parsedAmount, days, demoMode, telegramMode, telegramHandle]);
+  }, [canSubmit, addSwitch, switchTitle, beneficiaryName, beneficiaryAddress, parsedAmount, days, demoMode, telegramMode, telegramHandle, beneficiaryEmail]);
 
   const handleReset = useCallback(() => {
     setSwitchTitle("");
@@ -252,7 +253,7 @@ function CreateSwitchPageInner() {
                     </label>
                     <button
                       type="button"
-                      onClick={() => { setDemoMode((d) => !d); setDays(demoMode ? 90 : 2); }}
+                      onClick={() => { setDemoMode((d) => !d); setDays(demoMode ? 90 : 10); }}
                       className={cn(
                         "text-xs px-2.5 py-1 rounded-full border transition-colors",
                         demoMode
@@ -266,20 +267,20 @@ function CreateSwitchPageInner() {
                   <div className="flex items-center gap-4">
                     <input
                       type="range"
-                      min={demoMode ? 1 : 1}
-                      max={demoMode ? 10 : 90}
+                      min={demoMode ? 10 : 1}
+                      max={demoMode ? 120 : 90}
                       value={days}
                       onChange={(e) => setDays(Number(e.target.value))}
                       className="flex-1 h-2 rounded-full appearance-none bg-white/[0.06] cursor-pointer accent-accent [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-solana-gradient [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:shadow-accent/30 [&::-webkit-slider-thumb]:cursor-pointer"
                     />
                     <div className="glass px-4 py-2.5 rounded-xl flex items-baseline gap-1 min-w-[90px] justify-center">
                       <span className="text-xl font-bold text-white">{days}</span>
-                      <span className="text-sm text-muted">{demoMode ? "min" : "days"}</span>
+                      <span className="text-sm text-muted">{demoMode ? "sec" : "days"}</span>
                     </div>
                   </div>
                   <p className="mt-3 text-xs text-muted leading-relaxed">
                     {demoMode
-                      ? `Switch fires after ${days} minute${days === 1 ? "" : "s"} of inactivity. For demo purposes only.`
+                      ? `Switch fires after ${days} second${days === 1 ? "" : "s"} of inactivity. For demo purposes only.`
                       : days <= 14
                         ? `If you don\u2019t check in for ${days} days, your switch will trigger. This is a very short period \u2014 use with caution.`
                         : days <= 30
@@ -456,7 +457,7 @@ function CreateSwitchPageInner() {
                   <p className="text-sm text-secondary leading-relaxed">
                     If you fail to check in for{" "}
                     <span className="text-white font-semibold">
-                      {days} {demoMode ? "minutes" : "days"}
+                      {days} {demoMode ? "seconds" : "days"}
                     </span>,{" "}
                     <span className="text-white font-semibold">
                       {parsedAmount || "..."} SOL
@@ -545,10 +546,43 @@ function CreateSwitchPageInner() {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 1.4 }}
               >
-                Your assets are now protected.
+                {txSignature?.startsWith("demo_claim:")
+                  ? "Switch triggered! Share the claim link with your beneficiary."
+                  : "Your assets are now protected."}
               </motion.p>
 
-              {txSignature && (
+              {txSignature?.startsWith("demo_claim:") && (
+                <motion.div
+                  className="glass px-5 py-4 rounded-xl mb-6 w-full max-w-md space-y-3"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 1.6 }}
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+                    Beneficiary Claim Link
+                  </p>
+                  <div className="flex items-center gap-2 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2.5">
+                    <span className="font-mono text-sm text-accent truncate flex-1">
+                      /claim?code={txSignature.replace("demo_claim:", "")}
+                    </span>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(`${window.location.origin}/claim?code=${txSignature!.replace("demo_claim:", "")}`)}
+                      className="shrink-0 text-muted hover:text-white transition-colors"
+                    >
+                      <Link2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <Link
+                    href={`/claim?code=${txSignature.replace("demo_claim:", "")}`}
+                    className="inline-flex items-center gap-2 text-sm text-accent hover:text-accent/80 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Open claim page
+                  </Link>
+                </motion.div>
+              )}
+
+              {txSignature && !txSignature.startsWith("demo_claim:") && (
                 <motion.div
                   className="glass px-5 py-3 rounded-xl mb-6 inline-flex items-center gap-2"
                   initial={{ opacity: 0 }}

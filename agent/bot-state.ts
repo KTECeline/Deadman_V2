@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import * as path from "path";
 import * as crypto from "crypto";
 
-const DB_PATH = path.join(__dirname, "bot-state.db");
+const DB_PATH = path.join(process.env.DATA_DIR ?? __dirname, "bot-state.db");
 const db = new Database(DB_PATH);
 
 db.exec(`

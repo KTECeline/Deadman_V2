@@ -20,7 +20,7 @@ import {
   startClaimConversation,
 } from "./bot-conversation";
 
-const OFFSET_FILE = path.join(__dirname, "telegram-offset.json");
+const OFFSET_FILE = path.join(process.env.DATA_DIR ?? __dirname, "telegram-offset.json");
 
 type TgUpdate = {
   update_id?: number;

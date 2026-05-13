@@ -265,7 +265,7 @@ async function main() {
   setInterval(async () => {
     if (botBusy) return;
     botBusy = true;
-    try { await processBotCommands(); } catch {}
+    try { await processBotCommands(); } catch (e) { console.error("[bot] processBotCommands error:", e); }
     finally { botBusy = false; }
   }, 2_000);
 

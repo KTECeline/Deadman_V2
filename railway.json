@@ -1,6 +1,9 @@
 {
   "provider": "node",
+  "build": {
+    "cmd": "npm ci"
+  },
   "start": {
-    "cmd": "node -r ts-node/register -P tsconfig.agent.json agent/index.ts"
+    "cmd": "npx ts-node --project tsconfig.agent.json agent/index.ts"
   }
 }

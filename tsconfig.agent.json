@@ -4,7 +4,9 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "esModuleInterop": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "noEmit": false,
+    "noEmitOnError": false
   },
   "ts-node": {
     "transpileOnly": true

@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/*"]
+members = ["dead-mans-switch"]
 resolver = "2"
 
 [profile.release]

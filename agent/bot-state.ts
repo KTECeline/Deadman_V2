@@ -2,8 +2,7 @@ import Database from "better-sqlite3";
 import * as path from "path";
 import * as crypto from "crypto";
 
-// Use process.cwd() so both the agent (ts-node) and Next.js API routes hit the same file
-const DB_PATH = path.join(process.cwd(), "agent", "bot-state.db");
+const DB_PATH = path.join(__dirname, "bot-state.db");
 const db = new Database(DB_PATH);
 
 db.exec(`

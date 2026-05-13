@@ -9,5 +9,5 @@
   "ts-node": {
     "transpileOnly": true
   },
-  "include": ["agent/**/*.ts", "x402/**/*.ts"]
+  "include": ["agent/**/*.ts", "x402/**/*.ts", "tests/**/*.ts"]
 }

@@ -1,6 +1,9 @@
 {
   "provider": "node",
+  "build": {
+    "cmd": "npx tsc --project tsconfig.agent.json"
+  },
   "start": {
-    "cmd": "npx ts-node --project tsconfig.agent.json agent/index.ts"
+    "cmd": "node dist/agent/index.js"
   }
 }

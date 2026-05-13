@@ -269,12 +269,57 @@ export function SwitchesProvider({ children }: { children: ReactNode }) {
     fetchSwitches();
   }, [fetchSwitches]);
 
-  /* ---- addSwitch — calls createSwitch on-chain ---- */
+  /* ---- addSwitch — calls createSwitch on-chain, or creates mock if no wallet ---- */
   const addSwitch = useCallback(
     async (input: NewSwitchInput): Promise<string> => {
-      if (!program || !wallet.publicKey)
-        throw new Error("Wallet not connected");
+      /* ---- Mock mode: no wallet connected ---- */
+      if (!program || !wallet.publicKey) {
+        const mockId = Math.floor(Math.random() * 2 ** 32);
+        const mockPda = `mock_${mockId}`;
+        const nowSeconds = Math.floor(Date.now() / 1000);
 
+        const mockSwitch: SwitchData = {
+          id: mockId,
+          pda: mockPda,
+          title: input.title || `Switch #${mockId}`,
+          beneficiaryName: input.beneficiaryName || shorten(input.beneficiaryAddress),
+          beneficiaryAddress: input.beneficiaryAddress,
+          beneficiaryShort: shorten(input.beneficiaryAddress),
+          amount: input.amount,
+          amountLabel: `${input.amount} SOL`,
+          triggerCondition: `${input.triggerDays} days of inactivity`,
+          triggerDays: input.triggerDays,
+          status: "active",
+          daysRemaining: input.triggerDays,
+          lastCheckIn: "Just now",
+          createdAt: "Just now",
+          timeline: [
+            { label: "Switch Created", detail: "Mock (no wallet)", completed: true },
+            { label: "Vault Funded", detail: `${input.amount} SOL deposited`, completed: true },
+            { label: "Last Check-in", detail: "Just now", completed: true },
+            { label: "Trigger", detail: `In ${input.triggerDays} days`, completed: false },
+            { label: "Execution", detail: "Pending", completed: false },
+          ],
+          activity: [
+            { text: "Switch created (demo mode)", time: "Just now" },
+          ],
+        };
+
+        setSwitchTitle(mockPda, mockSwitch.title);
+        if (input.beneficiaryName) {
+          setBeneficiaryName(input.beneficiaryAddress, input.beneficiaryName);
+        }
+
+        setSwitches((prev) => [mockSwitch, ...prev]);
+        setGlobalActivity((prev) => [
+          { text: `${mockSwitch.title} created (demo)`, time: "Just now", icon: "plus" as const, color: "text-success" },
+          ...prev,
+        ]);
+
+        return `mock_tx_${mockId}`;
+      }
+
+      /* ---- Real on-chain mode ---- */
       const switchId = new anchor.BN(Math.floor(Math.random() * 2 ** 32));
       const checkInInterval = new anchor.BN(input.triggerDays * 86400);
       const lockedAmount = new anchor.BN(

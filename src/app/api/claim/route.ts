@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 
   const db = new Database(dbPath, { readonly: true });
   const row = db.prepare(
-    "SELECT switch_id, beneficiary_email, expires_at, used FROM claim_codes WHERE code = ?"
+    "SELECT switch_id, beneficiary_email, expires_at, used, amount FROM claim_codes WHERE code = ?"
   ).get(code) as any;
   db.close();
 
@@ -47,10 +47,35 @@ export async function GET(req: NextRequest) {
   if (row.used) return NextResponse.json({ error: "This claim code has already been used" }, { status: 410 });
   if (row.expires_at < Date.now()) return NextResponse.json({ error: "Claim code has expired" }, { status: 410 });
 
+  // Enrich with on-chain data (amount, owner), fall back to stored amount
+  let amount: number | null = row.amount ?? null;
+  let ownerAddress: string | null = null;
+  try {
+    const connection = new Connection(RPC, "confirmed");
+    const provider = new anchor.AnchorProvider(
+      connection,
+      { publicKey: Keypair.generate().publicKey, signTransaction: async (tx: any) => tx, signAllTransactions: async (txs: any[]) => txs } as any,
+      { commitment: "confirmed" }
+    );
+    const program = new anchor.Program(idl as any, provider);
+    const allSwitches = await (program.account as any).switch.all();
+    const sw = allSwitches.find(
+      (s: any) => s.account.switchId.toString() === row.switch_id
+    );
+    if (sw) {
+      amount = sw.account.lockedAmount.toNumber() / 1e9;
+      ownerAddress = sw.account.owner.toBase58();
+    }
+  } catch (e) {
+    // Non-fatal — page will still work without enrichment
+  }
+
   return NextResponse.json({
     switchId: row.switch_id,
     beneficiaryEmail: row.beneficiary_email,
     expiresAt: row.expires_at,
+    amount,
+    ownerAddress,
   });
 }
 

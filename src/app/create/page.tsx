@@ -156,7 +156,6 @@ function CreateSwitchPageInner() {
   const parsedAmount = parseFloat(amount) || 0;
   const effectiveBeneficiary = resolvedBeneficiaryAddress || beneficiaryAddress;
   const canSubmit =
-    !!publicKey &&
     effectiveBeneficiary.trim().length > 0 &&
     solNameStatus !== "resolving" &&
     solNameStatus !== "error" &&
@@ -547,11 +546,6 @@ function CreateSwitchPageInner() {
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
                       Creating on-chain...
-                    </>
-                  ) : !publicKey ? (
-                    <>
-                      <Wallet className="w-5 h-5" />
-                      Connect Wallet to Continue
                     </>
                   ) : (
                     <>

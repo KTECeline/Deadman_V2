@@ -24,10 +24,10 @@ const statusConfig: Record<
     glowColor: "shadow-warning/50",
   },
   critical: {
-    label: "Critical",
-    dotColor: "bg-danger",
-    textColor: "text-danger",
-    glowColor: "shadow-danger/50",
+    label: "Triggered",
+    dotColor: "bg-orange-400",
+    textColor: "text-orange-400",
+    glowColor: "shadow-orange-400/50",
   },
   executed: {
     label: "Executed",

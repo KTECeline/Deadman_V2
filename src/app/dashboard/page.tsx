@@ -170,7 +170,7 @@ export default function DashboardPage() {
                             : "bg-success/10 text-success border border-success/20"
                         )}
                       >
-                        {isWarn ? "Warning" : "Active"}
+                        {s.status === "critical" ? "Triggered" : isWarn ? "Warning" : "Active"}
                       </span>
                     </div>
                     <div className="space-y-1.5 text-xs text-secondary">

@@ -54,6 +54,40 @@ export async function sendClaimEmail(
   console.log(`[email] Claim email sent to ${to} (code: ${claimCode})`);
 }
 
+export async function sendExecutionEmail(
+  beneficiaryEmail: string,
+  ownerShort: string,
+  amountSol: number,
+  txSig: string
+): Promise<void> {
+  const explorerUrl = `https://explorer.solana.com/tx/${txSig}?cluster=devnet`;
+
+  await client().emails.send({
+    from: FROM,
+    to: beneficiaryEmail,
+    subject: `You received ${amountSol} SOL from ${ownerShort}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0d0d0d;color:#fff;border-radius:16px">
+        <h1 style="font-size:24px;font-weight:700;margin-bottom:8px">Your inheritance has arrived</h1>
+        <p style="color:#aaa;margin-bottom:24px">
+          <strong style="color:#fff">${ownerShort}</strong>'s Dead Man's Switch has fired.
+          The funds have been transferred directly to your wallet on Solana.
+        </p>
+        <div style="background:#1a1a1a;border-radius:12px;padding:20px;margin-bottom:24px">
+          <p style="margin:0 0 4px;color:#aaa;font-size:13px">Amount transferred</p>
+          <p style="margin:0;font-size:32px;font-weight:700;color:#14F195">${amountSol} SOL</p>
+        </div>
+        <a href="${explorerUrl}" style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#9945FF,#14F195);color:#fff;font-weight:600;border-radius:10px;text-decoration:none;font-size:15px">
+          View Transaction
+        </a>
+        <p style="color:#555;font-size:12px;margin-top:24px">Transaction: ${txSig}</p>
+      </div>
+    `,
+  });
+
+  console.log(`[email] Execution notice sent to ${beneficiaryEmail}`);
+}
+
 export async function sendActivationEmail(to: string, appUrl: string): Promise<void> {
   await client().emails.send({
     from: FROM,

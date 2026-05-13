@@ -30,9 +30,8 @@ import {
   processBotCommands,
   resolveChatId,
 } from "./telegram";
-import { createClaimCode } from "./bot-state";
-import { sendClaimEmail } from "./email";
-import { lookupSolName, resolveSolName } from "./sns";
+import { createClaimCode, getSwitchEmail } from "./bot-state";
+import { sendClaimEmail, sendExecutionEmail } from "./email";
 import {
   startGracePeriod,
   getGracePeriod,
@@ -89,8 +88,6 @@ async function runConditionLoop(
   agentKeypair: Keypair,
   executedSwitches: Set<string>
 ) {
-  await processBotCommands();
-
   const switches = await fetchActiveSwitches(program);
   console.log(`\n[agent] Checking ${switches.length} active switch(es)...`);
 
@@ -110,11 +107,21 @@ async function runConditionLoop(
 
       if (!grace) {
         // First expiry — send warning and start grace period
-        if (chatId) await sendWarning(chatId, sw.switchId, GRACE_PERIOD_DAYS);
+        const emailRec = getSwitchEmail(sw.switchId.toString());
+        if (chatId) {
+          await sendWarning(chatId, sw.switchId, GRACE_PERIOD_DAYS, {
+            amountSol: Number(sw.lockedAmount) / 1e9,
+            beneficiaryName: emailRec?.name ?? undefined,
+          });
+        } else {
+          console.warn(
+            `[agent] ⚠️  Switch ${sw.switchId} expired but no Telegram chat is linked for owner ${sw.owner.toBase58()}`
+          );
+        }
         startGracePeriod(sw.switchId, chatId ?? "");
         console.log(
           `[agent] ⚠️  Switch ${sw.switchId} expired — grace period started ` +
-          `(${GRACE_PERIOD_DAYS}d). Telegram warning sent.`
+          `(${GRACE_PERIOD_DAYS}d).${chatId ? " Telegram warning sent." : " Telegram warning skipped."}`
         );
       } else if (isGraceExpired(grace, GRACE_PERIOD_MS)) {
         // Grace period over — execute
@@ -122,28 +129,47 @@ async function runConditionLoop(
         try {
           const sig = await executeSwitch(sw, agentKeypair);
           executedSwitches.add(key);
-          if (chatId) await sendExecutionNotice(chatId, sw.switchId, sig, sw.lockedAmount);
+          const emailRec2 = getSwitchEmail(sw.switchId.toString());
+          if (chatId) await sendExecutionNotice(chatId, sw.switchId, sig, sw.lockedAmount, {
+            beneficiaryName: emailRec2?.name ?? undefined,
+            beneficiaryEmail: emailRec2?.email,
+          });
           clearGracePeriod(sw.switchId);
           console.log(`[agent] ✅ Switch ${sw.switchId} executed. Sig: ${sig}`);
 
-          // If beneficiary had no wallet, read email from cNFT URI and send claim email
-          const beneficiaryIsUnset =
-            sw.beneficiary.toBase58() === anchor.web3.PublicKey.default.toBase58();
-          if (beneficiaryIsUnset && process.env.RESEND_API_KEY) {
-            const beneficiaryEmail = await readEmailFromCnft(sw.cnftAssetId.toBase58());
-            if (beneficiaryEmail) {
-              const claimCode = createClaimCode(sw.switchId.toString(), beneficiaryEmail);
-              await sendClaimEmail(
-                beneficiaryEmail,
-                sw.owner.toBase58().slice(0, 8),
-                Number(sw.lockedAmount) / 1e9,
-                claimCode
-              );
-              console.log(`[agent] 📧 Claim email sent to ${beneficiaryEmail}`);
+          // Email the beneficiary using address stored at switch creation time
+          if (process.env.RESEND_API_KEY) {
+            const emailRecord = getSwitchEmail(sw.switchId.toString());
+            if (emailRecord) {
+              const amountSol = Number(sw.lockedAmount) / 1e9;
+              const ownerShort = sw.owner.toBase58().slice(0, 8);
+              const beneficiaryIsUnset =
+                sw.beneficiary.toBase58() === anchor.web3.PublicKey.default.toBase58();
+
+              if (beneficiaryIsUnset) {
+                const claimCode = createClaimCode(sw.switchId.toString(), emailRecord.email);
+                await sendClaimEmail(emailRecord.email, ownerShort, amountSol, claimCode);
+                console.log(`[agent] 📧 Claim email sent to ${emailRecord.email}`);
+              } else {
+                await sendExecutionEmail(emailRecord.email, ownerShort, amountSol, sig);
+                console.log(`[agent] 📧 Execution notice sent to ${emailRecord.email}`);
+              }
+            } else {
+              console.log(`[agent] No email registered for switch ${sw.switchId} — skipping email`);
             }
           }
         } catch (err: any) {
-          console.error(`[agent] ❌ Execute failed for switch ${sw.switchId}:`, err.message);
+          if (err.message?.includes("SwitchNotExpired")) {
+            // On-chain interval hasn't elapsed yet (e.g. DEMO_TRIGGER_SECONDS shorter than real interval)
+            // Clear the grace period so we don't retry until the switch naturally expires on-chain
+            clearGracePeriod(sw.switchId);
+            console.warn(
+              `[agent] ⚠️  Switch ${sw.switchId} — on-chain interval not yet elapsed. ` +
+              `Grace period cleared. Delete and recreate with NEXT_PUBLIC_DEMO_TRIGGER_SECONDS set.`
+            );
+          } else {
+            console.error(`[agent] ❌ Execute failed for switch ${sw.switchId}:`, err.message);
+          }
         }
       } else {
         // Inside grace period — check for Telegram alive signal
@@ -216,25 +242,10 @@ async function main() {
 
   const agentKeypair = loadAgentKeypair();
   const program = loadProgram(agentKeypair);
-  const connection = program.provider.connection;
 
   console.log(`[agent] Wallet: ${agentKeypair.publicKey.toBase58()}`);
   console.log(`[agent] Program: ${program.programId.toBase58()}`);
 
-  // Resolve agent .sol identity
-  const agentDomain = await lookupSolName(agentKeypair.publicKey, connection);
-  if (agentDomain) {
-    console.log(`[agent] Identity: ${agentDomain} (${agentKeypair.publicKey.toBase58()})`);
-  } else if (process.env.AGENT_SOL_NAME) {
-    const resolved = await resolveSolName(process.env.AGENT_SOL_NAME, connection);
-    if (resolved?.toBase58() === agentKeypair.publicKey.toBase58()) {
-      console.log(`[agent] Identity: ${process.env.AGENT_SOL_NAME} ✓`);
-    } else {
-      console.log(`[agent] Identity: ${agentKeypair.publicKey.toBase58()} (no .sol domain yet)`);
-    }
-  } else {
-    console.log(`[agent] Identity: ${agentKeypair.publicKey.toBase58()} (no .sol domain yet)`);
-  }
 
   // Fetch initial switches and start a websocket monitor for each
   const switches = await fetchActiveSwitches(program);
@@ -248,6 +259,15 @@ async function main() {
     const ws = startHeartbeatMonitor(sw, agentKeypair);
     activeSockets.set(sw.publicKey.toBase58(), ws);
   }
+
+  // Dedicated bot polling loop — 2s interval, guarded to prevent concurrent runs
+  let botBusy = false;
+  setInterval(async () => {
+    if (botBusy) return;
+    botBusy = true;
+    try { await processBotCommands(); } catch {}
+    finally { botBusy = false; }
+  }, 2_000);
 
   // Run condition check immediately, then on interval
   await runConditionLoop(program, agentKeypair, executedSwitches);

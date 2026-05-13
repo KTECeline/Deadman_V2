@@ -10,8 +10,12 @@ export interface ConditionResult {
 export function evaluateTimeCondition(account: SwitchAccount): ConditionResult {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const elapsedSeconds = nowSeconds - account.lastCheckIn;
-  const remainingSeconds = account.checkInInterval - elapsedSeconds;
-  const shouldExecute = elapsedSeconds >= account.checkInInterval;
+  // DEMO_TRIGGER_SECONDS overrides the on-chain interval for quick demos
+  const effectiveInterval = process.env.DEMO_TRIGGER_SECONDS
+    ? parseInt(process.env.DEMO_TRIGGER_SECONDS)
+    : account.checkInInterval;
+  const remainingSeconds = effectiveInterval - elapsedSeconds;
+  const shouldExecute = elapsedSeconds >= effectiveInterval;
 
   const reason = shouldExecute
     ? `Inactive for ${elapsedSeconds}s — interval of ${account.checkInInterval}s exceeded`

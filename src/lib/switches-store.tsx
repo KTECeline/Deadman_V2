@@ -19,7 +19,6 @@ import {
   getBeneficiaryName,
   setBeneficiaryName,
 } from "@/lib/switch-names";
-import { lookupSolName } from "@/lib/sns";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -178,7 +177,7 @@ interface SwitchesContextValue {
   cancelSwitch: (id: number) => void;
   getSwitch: (id: number) => SwitchData | undefined;
   updateSwitch: (id: number, updates: SwitchUpdate) => void;
-  addSwitch: (input: NewSwitchInput) => Promise<string>;
+  addSwitch: (input: NewSwitchInput) => Promise<{ sig: string; switchId: number }>;
   refresh: () => Promise<void>;
 }
 
@@ -227,23 +226,9 @@ export function SwitchesProvider({ children }: { children: ReactNode }) {
         },
       ]);
 
-      const raw = accounts
+      const data = accounts
         .map(({ account, publicKey }) => toSwitchData(account, publicKey))
         .sort((a, b) => b.id - a.id);
-
-      // Enrich with .sol names where no manual name is stored
-      const data = await Promise.all(
-        raw.map(async (sw) => {
-          const stored = getBeneficiaryName(sw.beneficiaryAddress, "");
-          if (stored) return sw;
-          const solName = await lookupSolName(sw.beneficiaryAddress);
-          if (solName) {
-            setBeneficiaryName(sw.beneficiaryAddress, solName);
-            return { ...sw, beneficiaryName: solName, beneficiaryShort: solName };
-          }
-          return sw;
-        })
-      );
 
       setSwitches(data);
       setGlobalActivity(
@@ -271,12 +256,16 @@ export function SwitchesProvider({ children }: { children: ReactNode }) {
 
   /* ---- addSwitch — calls createSwitch on-chain ---- */
   const addSwitch = useCallback(
-    async (input: NewSwitchInput): Promise<string> => {
+    async (input: NewSwitchInput): Promise<{ sig: string; switchId: number }> => {
       if (!program || !wallet.publicKey)
         throw new Error("Wallet not connected");
 
       const switchId = new anchor.BN(Math.floor(Math.random() * 2 ** 32));
-      const checkInInterval = new anchor.BN(input.triggerDays * 86400);
+      // NEXT_PUBLIC_DEMO_TRIGGER_SECONDS overrides on-chain interval for live demos
+      const demoSecs = process.env.NEXT_PUBLIC_DEMO_TRIGGER_SECONDS
+        ? parseInt(process.env.NEXT_PUBLIC_DEMO_TRIGGER_SECONDS)
+        : null;
+      const checkInInterval = new anchor.BN(demoSecs ?? input.triggerDays * 86400);
       const lockedAmount = new anchor.BN(
         Math.floor(input.amount * LAMPORTS_PER_SOL)
       );
@@ -316,7 +305,7 @@ export function SwitchesProvider({ children }: { children: ReactNode }) {
       ]);
 
       await fetchSwitches();
-      return tx;
+      return { sig: tx, switchId: switchId.toNumber() };
     },
     [program, wallet.publicKey, fetchSwitches]
   );

@@ -2,10 +2,17 @@ import Database from "better-sqlite3";
 import * as path from "path";
 import * as crypto from "crypto";
 
-const DB_PATH = path.join(__dirname, "bot-state.db");
+// Use process.cwd() so both the agent (ts-node) and Next.js API routes hit the same file
+const DB_PATH = path.join(process.cwd(), "agent", "bot-state.db");
 const db = new Database(DB_PATH);
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS activated_switches (
+    switch_id    TEXT PRIMARY KEY,
+    owner_wallet TEXT NOT NULL,
+    activated_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS owners (
     chat_id     TEXT PRIMARY KEY,
     wallet      TEXT NOT NULL,
@@ -27,6 +34,13 @@ db.exec(`
     beneficiary_email TEXT NOT NULL,
     expires_at        INTEGER NOT NULL,
     used              INTEGER DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS switch_emails (
+    switch_id         TEXT PRIMARY KEY,
+    beneficiary_email TEXT NOT NULL,
+    beneficiary_name  TEXT,
+    registered_at     INTEGER NOT NULL
   );
 `);
 
@@ -131,4 +145,47 @@ export function verifyClaimCode(code: string): { switchId: string; beneficiaryEm
   if (!row) return null;
   db.prepare("UPDATE claim_codes SET used = 1 WHERE code = ?").run(code);
   return { switchId: row.switch_id, beneficiaryEmail: row.beneficiary_email };
+}
+
+// ── Activated switches ────────────────────────────────────────────────────────
+
+export function activateSwitch(switchId: string, ownerWallet: string): void {
+  db.prepare(`
+    INSERT INTO activated_switches (switch_id, owner_wallet, activated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(switch_id) DO NOTHING
+  `).run(switchId, ownerWallet, Date.now());
+}
+
+export function isSwitchActivated(switchId: string): boolean {
+  const row = db.prepare(
+    "SELECT 1 FROM activated_switches WHERE switch_id = ?"
+  ).get(switchId) as any;
+  return !!row;
+}
+
+// ── Switch email registry ─────────────────────────────────────────────────────
+
+export function registerSwitchEmail(
+  switchId: string,
+  beneficiaryEmail: string,
+  beneficiaryName?: string
+): void {
+  db.prepare(`
+    INSERT INTO switch_emails (switch_id, beneficiary_email, beneficiary_name, registered_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(switch_id) DO UPDATE SET
+      beneficiary_email = excluded.beneficiary_email,
+      beneficiary_name  = excluded.beneficiary_name
+  `).run(switchId, beneficiaryEmail, beneficiaryName ?? null, Date.now());
+}
+
+export function getSwitchEmail(
+  switchId: string
+): { email: string; name: string | null } | null {
+  const row = db.prepare(
+    "SELECT beneficiary_email, beneficiary_name FROM switch_emails WHERE switch_id = ?"
+  ).get(switchId) as any;
+  if (!row) return null;
+  return { email: row.beneficiary_email, name: row.beneficiary_name };
 }

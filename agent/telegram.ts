@@ -22,6 +22,16 @@ import {
 
 const OFFSET_FILE = path.join(__dirname, "telegram-offset.json");
 
+type TgUpdate = {
+  update_id?: number;
+  message?: {
+    chat?: { id?: number };
+    text?: string;
+    date?: number;
+    from?: { username?: string; id?: number };
+  };
+};
+
 function apiUrl(method: string): string {
   return `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/${method}`;
 }
@@ -48,28 +58,57 @@ export function resolveChatId(ownerWallet: string): string | null {
   return process.env.TELEGRAM_CHAT_ID || null;
 }
 
+function esc(s: string): string {
+  return String(s).replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
+}
+
+function htmlEsc(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function sendWarning(
   chatId: string | number,
   switchId: string | bigint,
-  graceDays: number
+  graceDays: number,
+  opts?: { amountSol?: number; beneficiaryName?: string }
 ): Promise<void> {
   if (!process.env.TELEGRAM_BOT_TOKEN) return;
 
+  const appBase = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const daysLabel = htmlEsc(`${graceDays} day${graceDays === 1 ? "" : "s"}`);
+  const amountLine = opts?.amountSol
+    ? `💰 <b>${htmlEsc(opts.amountSol.toFixed(4))} SOL</b> will transfer to ${htmlEsc(opts.beneficiaryName ?? "your beneficiary")}\n`
+    : "";
+
   const text =
-    `⚠️ *Dead Man's Switch — Warning*\n\n` +
-    `Switch \\#${switchId} has been inactive and is scheduled to execute\\.\n\n` +
-    `You have *${graceDays} day${graceDays === 1 ? "" : "s"}* to respond\\.\n\n` +
-    `Reply with anything \\(e\\.g\\. "I'm alive"\\) to reset the timer\\.`;
+    `⚠️ <b>Dead Man's Switch — Warning</b>\n\n` +
+    `Switch <b>#${htmlEsc(String(switchId))}</b> has expired — no wallet activity detected.\n\n` +
+    amountLine +
+    `⏳ You have <b>${daysLabel}</b> to respond before funds are sent.\n\n` +
+    `<b>Reply with anything</b> (e.g. &quot;I'm alive&quot;) to reset the timer.`;
+
+  const replyMarkup = {
+    inline_keyboard: [[{ text: "🔍 Open Dashboard", url: `${appBase}/switches` }]],
+  };
 
   try {
-    await fetch(apiUrl("sendMessage"), {
+    const res = await fetch(apiUrl("sendMessage"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "MarkdownV2" }),
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", reply_markup: replyMarkup }),
     });
+    const responseText = await res.text();
+    if (!res.ok) {
+      throw new Error(`Telegram sendMessage failed (${res.status}): ${responseText}`);
+    }
     console.log(`[telegram] ⚠️  Warning sent to chat ${chatId} for switch ${switchId}`);
-  } catch (err: any) {
-    console.error("[telegram] Failed to send warning:", err.message);
+  } catch (err: unknown) {
+    console.error("[telegram] Failed to send warning:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -77,16 +116,27 @@ export async function sendExecutionNotice(
   chatId: string | number,
   switchId: string | bigint,
   sig: string,
-  lamports: bigint
+  lamports: bigint,
+  opts?: { beneficiaryName?: string; beneficiaryEmail?: string }
 ): Promise<void> {
   if (!process.env.TELEGRAM_BOT_TOKEN) return;
 
-  const sol = (Number(lamports) / 1e9).toFixed(4);
+  const sol = esc((Number(lamports) / 1e9).toFixed(4));
+  const explorerUrl = `https://explorer.solana.com/tx/${sig}?cluster=devnet`;
+  const recipientLine = opts?.beneficiaryName
+    ? `👤 *Recipient:* ${esc(opts.beneficiaryName)}\n`
+    : "";
+  const emailLine = opts?.beneficiaryEmail
+    ? `📧 Notification sent to ${esc(opts.beneficiaryEmail)}\n`
+    : "";
+
   const text =
-    `🔴 *Dead Man's Switch Executed*\n\n` +
-    `Switch \\#${switchId} — no response received within the grace period\\.\n\n` +
-    `*${sol} SOL* transferred to beneficiary\\.\n` +
-    `Tx: \`${sig}\``;
+    `🔴 *Switch Executed*\n\n` +
+    `Switch *\\#${esc(String(switchId))}* has fired — no check\\-in received\\.\n\n` +
+    `💰 *${sol} SOL* transferred to beneficiary\n` +
+    recipientLine +
+    emailLine +
+    `\n[View on Solana Explorer](${explorerUrl})`;
 
   try {
     await fetch(apiUrl("sendMessage"), {
@@ -95,8 +145,8 @@ export async function sendExecutionNotice(
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: "MarkdownV2" }),
     });
     console.log(`[telegram] 🔴 Execution notice sent for switch ${switchId}`);
-  } catch (err: any) {
-    console.error("[telegram] Failed to send execution notice:", err.message);
+  } catch (err: unknown) {
+    console.error("[telegram] Failed to send execution notice:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -108,7 +158,8 @@ export async function sendResetConfirmation(
 
   const text =
     `✅ *Timer Reset*\n\n` +
-    `Got your message\\. Switch \\#${switchId} timer has been reset — you're good\\.`;
+    `Got your signal\\. Switch *\\#${esc(String(switchId))}* is back to active monitoring\\.\n\n` +
+    `Stay alive out there\\.`;
 
   try {
     await fetch(apiUrl("sendMessage"), {
@@ -116,8 +167,8 @@ export async function sendResetConfirmation(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: "MarkdownV2" }),
     });
-  } catch (err: any) {
-    console.error("[telegram] Failed to send reset confirmation:", err.message);
+  } catch (err: unknown) {
+    console.error("[telegram] Failed to send reset confirmation:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -132,12 +183,12 @@ export async function processBotCommands(): Promise<void> {
 
   try {
     const res = await fetch(`${apiUrl("getUpdates")}?offset=${offset}&limit=100&timeout=0`);
-    const data = (await res.json()) as any;
+    const maybe = (await res.json()) as { ok?: boolean; result?: TgUpdate[] } | null;
 
-    if (!data.ok || !data.result?.length) return;
+    if (!maybe?.ok || !maybe?.result?.length) return;
 
-    for (const update of data.result) {
-      offset = Math.max(offset, update.update_id + 1);
+    for (const update of maybe.result) {
+      offset = Math.max(offset, (update.update_id ?? 0) + 1);
       const chatId = update.message?.chat?.id;
       const text = (update.message?.text ?? "").trim();
 
@@ -182,8 +233,9 @@ export async function processBotCommands(): Promise<void> {
     }
 
     saveOffset(offset);
-  } catch (err: any) {
-    console.error("[telegram] Failed to process bot commands:", err.message);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[telegram] Failed to process bot commands:", msg);
   }
 }
 
@@ -199,12 +251,12 @@ export async function checkForAliveSignal(sinceMs: number): Promise<boolean> {
 
   try {
     const res = await fetch(`${apiUrl("getUpdates")}?offset=${offset}&limit=100&timeout=0`);
-    const data = (await res.json()) as any;
+    const maybe = (await res.json()) as { ok?: boolean; result?: TgUpdate[] } | null;
 
-    if (!data.ok || !data.result?.length) return false;
+    if (!maybe?.ok || !maybe?.result?.length) return false;
 
-    for (const update of data.result) {
-      offset = Math.max(offset, update.update_id + 1);
+    for (const update of maybe.result) {
+      offset = Math.max(offset, (update.update_id ?? 0) + 1);
       const text = update.message?.text ?? "";
       const msgDate = (update.message?.date ?? 0) * 1000;
 
@@ -218,8 +270,9 @@ export async function checkForAliveSignal(sinceMs: number): Promise<boolean> {
     }
 
     saveOffset(offset);
-  } catch (err: any) {
-    console.error("[telegram] Failed to poll updates:", err.message);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[telegram] Failed to poll updates:", msg);
   }
 
   return found;

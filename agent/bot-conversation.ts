@@ -16,101 +16,95 @@ import {
   ConversationStep,
 } from "./bot-state";
 
-const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
+let _groq: Groq | null = null;
+function client(): Groq {
+  if (!_groq) _groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  return _groq;
+}
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-
-// ── Prompts for each step ─────────────────────────────────────────────────────
-
-const STEP_PROMPTS: Record<ConversationStep, string> = {
-  use_case:
-    "You are an assistant helping set up a Dead Man's Switch on Solana. " +
-    "Ask the user in one friendly sentence: what this switch is for. " +
-    "Examples: send SOL to my daughter if I'm inactive, recurring $2 weekly to my kid's wallet, pause DeFi positions if I don't check in.",
-  grace_period:
-    "Ask in one sentence: how many days of inactivity should pass before the switch triggers. " +
-    "Suggest common values: 30, 60, 90 days.",
-  amount:
-    "Ask in one sentence: how much SOL they want to lock in the switch.",
-  beneficiary_name:
-    "Ask in one sentence: the name of the beneficiary (just for their reference, can be a nickname).",
-  beneficiary_email:
-    "Ask in one sentence: the beneficiary's email address. Explain it will be used to notify them when the switch fires.",
-  confirm:
-    "Show the full summary and ask the user to confirm with yes or no.",
-  claim_wallet:
-    "Ask the user in one friendly sentence: do they have a Solana wallet address they want to receive their funds at? " +
-    "If yes, ask them to paste it. If no, tell them they can create a free wallet at " + APP_URL + "/wallet and come back.",
-  idle: "",
-};
 
 // ── Parse user reply with Claude ─────────────────────────────────────────────
 
 async function parseReply(
   step: ConversationStep,
-  userMessage: string,
-  data: ConversationData
-): Promise<{ value: any; valid: boolean; feedback?: string }> {
-  const systemPrompt =
-    `You are parsing a user reply in a Dead Man's Switch onboarding chat. ` +
-    `Current step: "${step}". ` +
-    `Respond with JSON only: { "value": <extracted value>, "valid": true/false, "feedback": "<short message if invalid>" }. ` +
-    `Rules: ` +
-    (step === "grace_period" ? `Extract a number of days (integer 1-365). ` : "") +
-    (step === "amount" ? `Extract a SOL amount (positive number). ` : "") +
-    (step === "beneficiary_email" ? `Validate it looks like an email. ` : "") +
-    (step === "confirm" ? `Return { value: true/false, valid: true } based on yes/no. ` : "") +
-    (step === "claim_wallet"
-      ? `If user provides a Solana address (base58, 32-44 chars), return { value: <address>, valid: true }. ` +
-        `If they say no or don't have one, return { value: null, valid: true }. `
-      : "") +
-    `For other steps, any non-empty string is valid, return it as value.`;
+  userMessage: string
+): Promise<{ value: string | number | boolean | null; valid: boolean; feedback?: string }> {
+  const msg = userMessage.trim();
 
-  const response = await client.chat.completions.create({
-    model: "llama3-8b-8192",
+  // Free-text steps — accept anything the user types, no LLM needed
+  if (step === "use_case" || step === "beneficiary_name") {
+    return { value: msg || "unspecified", valid: true };
+  }
+
+  // Structured steps — use LLM to extract and validate
+  const systemPrompt =
+    `You are extracting structured data from a user reply in a Dead Man's Switch onboarding chat. ` +
+    `Respond with JSON only, no explanation: { "value": <extracted>, "valid": true/false, "feedback": "<one friendly sentence if invalid>" }. ` +
+    (step === "grace_period"
+      ? `Extract the number of days as an integer (1-365). If the user says something like "3 months" convert it. If no number is found, set valid: false and ask them to give a number of days.`
+      : step === "amount"
+      ? `Extract the SOL amount as a number. Accept values like "5 SOL", "0.5", "half a SOL" (≈0.5). If no valid amount, set valid: false.`
+      : step === "beneficiary_email"
+      ? `Validate the email address format. If valid set valid: true. If not an email, set valid: false with friendly feedback.`
+      : step === "confirm"
+      ? `User is confirming or rejecting. Return { value: true, valid: true } for yes/confirm, { value: false, valid: true } for no/cancel.`
+      : step === "claim_wallet"
+      ? `If the user provides a Solana base58 address (32-44 chars, no spaces), return { value: "<address>", valid: true }. If they say no or don't have one, return { value: null, valid: true }.`
+      : `Return { value: "${msg}", valid: true }.`);
+
+  const response = await client().chat.completions.create({
+    model: "llama-3.1-8b-instant",
     max_tokens: 128,
     messages: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
+      { role: "user", content: msg },
     ],
   });
 
   try {
     const text = (response.choices[0].message.content ?? "").trim();
-    const json = text.startsWith("{") ? text : text.slice(text.indexOf("{"));
-    return JSON.parse(json);
+    const jsonStart = text.indexOf("{");
+    const jsonEnd = text.lastIndexOf("}");
+    if (jsonStart === -1 || jsonEnd === -1) return { value: msg, valid: true };
+    return JSON.parse(text.slice(jsonStart, jsonEnd + 1));
   } catch {
-    return { value: userMessage.trim(), valid: true };
+    return { value: msg, valid: true };
   }
 }
 
+// ── Hardcoded questions for each step ────────────────────────────────────────
+
+const STEP_QUESTIONS: Partial<Record<ConversationStep, string>> = {
+  use_case:
+    "What's this switch for? \\(e\\.g\\. send SOL to my daughter if I'm inactive, pause DeFi if I don't check in\\)",
+  grace_period:
+    "How many days of inactivity before the switch triggers? \\(common values: 30, 60, 90\\)",
+  amount: "How much SOL do you want to lock in?",
+  beneficiary_name: "What's the beneficiary's name? \\(just a nickname for your reference\\)",
+  beneficiary_email:
+    "What's the beneficiary's email address? \\(they'll be notified when the switch fires\\)",
+  claim_wallet:
+    `Do you have a Solana wallet address to receive the funds? Paste it below, or say *no* and I'll help you create one at ${APP_URL}/wallet`,
+};
+
 // ── Compose bot message for each step ────────────────────────────────────────
 
-async function composeQuestion(step: ConversationStep, data: ConversationData): Promise<string> {
+function composeQuestion(step: ConversationStep, data: ConversationData): string {
   if (step === "confirm") {
     return (
       `📋 *Here's your switch summary:*\n\n` +
-      `*Use case:* ${data.useCase}\n` +
-      `*Trigger:* ${data.graceDays} days of inactivity\n` +
-      `*Amount:* ${data.amountSol} SOL\n` +
-      `*Beneficiary:* ${data.beneficiaryName} \\(${data.beneficiaryEmail}\\)\n\n` +
+      `*Use case:* ${escapeMarkdown(String(data.useCase ?? ""))}\n` +
+      `*Trigger:* ${escapeMarkdown(String(data.graceDays ?? ""))} days of inactivity\n` +
+      `*Amount:* ${escapeMarkdown(String(data.amountSol ?? ""))} SOL\n` +
+      `*Beneficiary:* ${escapeMarkdown(String(data.beneficiaryName ?? ""))} \\(${escapeMarkdown(String(data.beneficiaryEmail ?? ""))}\\)\n\n` +
       `Reply *yes* to confirm and get your setup link, or *no* to start over\\.`
     );
   }
 
   if (step === "idle") return "";
 
-  const prompt = STEP_PROMPTS[step];
-  const response = await client.chat.completions.create({
-    model: "llama3-8b-8192",
-    max_tokens: 80,
-    messages: [
-      { role: "system", content: "You are a friendly assistant. Reply in one short sentence only. No markdown, no emoji unless natural." },
-      { role: "user", content: prompt },
-    ],
-  });
-
-  return (response.choices[0].message.content ?? "").trim();
+  return STEP_QUESTIONS[step] ?? "";
 }
 
 // ── Encode prefill data for the create page ───────────────────────────────────
@@ -137,7 +131,7 @@ function buildDeepLink(_chatId: string, data: ConversationData, authCode: string
  */
 export async function startConversation(chatId: string): Promise<string> {
   setConversation(chatId, "use_case", {});
-  const question = await composeQuestion("use_case", {});
+  const question = composeQuestion("use_case", {});
   return `👋 Let's set up your Dead Man's Switch\\.\n\n${question}`;
 }
 
@@ -157,7 +151,7 @@ export async function handleConversationMessage(
 
   // ── Claim flow ─────────────────────────────────────────────────────────────
   if (step === "claim_wallet") {
-    const parsed = await parseReply("claim_wallet", userMessage, data);
+    const parsed = await parseReply("claim_wallet", userMessage);
     if (parsed.value) {
       // They provided an address — return it as signal to caller
       clearConversation(chatId);
@@ -172,7 +166,7 @@ export async function handleConversationMessage(
   }
 
   // ── Onboarding flow ────────────────────────────────────────────────────────
-  const parsed = await parseReply(step, userMessage, data);
+  const parsed = await parseReply(step, userMessage);
 
   if (!parsed.valid) {
     return parsed.feedback
@@ -183,11 +177,11 @@ export async function handleConversationMessage(
   const updatedData = { ...data };
 
   switch (step) {
-    case "use_case":       updatedData.useCase = parsed.value; break;
-    case "grace_period":   updatedData.graceDays = parsed.value; break;
-    case "amount":         updatedData.amountSol = parsed.value; break;
-    case "beneficiary_name":  updatedData.beneficiaryName = parsed.value; break;
-    case "beneficiary_email": updatedData.beneficiaryEmail = parsed.value; break;
+    case "use_case":       updatedData.useCase = String(parsed.value ?? ""); break;
+    case "grace_period":   updatedData.graceDays = Number(parsed.value); break;
+    case "amount":         updatedData.amountSol = Number(parsed.value); break;
+    case "beneficiary_name":  updatedData.beneficiaryName = String(parsed.value ?? ""); break;
+    case "beneficiary_email": updatedData.beneficiaryEmail = String(parsed.value ?? ""); break;
     case "confirm": {
       if (!parsed.value) {
         clearConversation(chatId);
@@ -199,8 +193,8 @@ export async function handleConversationMessage(
       clearConversation(chatId);
       return (
         `✅ *Perfect\\!*\n\n` +
-        `Open this link to connect your Phantom wallet and create your switch on\\-chain:\n\n` +
-        `[Set up my switch](${link})\n\n` +
+        `Open this link in your browser to connect Phantom and create your switch on\\-chain:\n\n` +
+        `\`${link}\`\n\n` +
         `The link expires in 15 minutes\\.`
       );
     }
@@ -220,7 +214,7 @@ export async function handleConversationMessage(
   const nextStep = NEXT_STEP[step];
   setConversation(chatId, nextStep, updatedData);
 
-  const nextQuestion = await composeQuestion(nextStep, updatedData);
+  const nextQuestion = composeQuestion(nextStep, updatedData);
   return nextQuestion;
 }
 
@@ -235,7 +229,7 @@ export async function startClaimConversation(chatId: string, claimCode: string):
   }
 
   setConversation(chatId, "claim_wallet", { claimCode, switchId: claim.switchId });
-  const question = await composeQuestion("claim_wallet", {});
+  const question = composeQuestion("claim_wallet", {});
   return question;
 }
 

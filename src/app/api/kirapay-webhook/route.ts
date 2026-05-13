@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTransaction, parseCustomOrderId } from "../../../../agent/kirapay";
+import { activateSwitch } from "../../../../agent/bot-state";
 
 /**
  * KiraPay sends POST events here for transaction lifecycle.
@@ -40,14 +41,15 @@ export async function POST(req: NextRequest) {
       if (customOrderId) {
         const parsed = parseCustomOrderId(customOrderId);
         if (parsed) {
+          // Mark switch as activated in SQLite — agent reads this before monitoring
+          activateSwitch(parsed.switchId, parsed.ownerWallet);
           console.log(
             `[kirapay-webhook] Switch ${parsed.switchId} activated for owner ${parsed.ownerWallet}`
           );
 
-          // Notify owner via Telegram if bot token is configured
+          // Notify owner via Telegram
           const token = process.env.TELEGRAM_BOT_TOKEN;
           if (token) {
-            // Broadcast — in full multi-user mode this would look up chatId from SQLite
             await sendActivationNotice(token, parsed.switchId, data.settlementAmount ?? data.price ?? 1);
           }
         }

@@ -96,7 +96,10 @@ async function runConditionLoop(
     if (executedSwitches.has(key)) continue;
 
     // Only act on switches where this agent is the authorized watcher
-    if (sw.watcher.toBase58() !== agentKeypair.publicKey.toBase58()) continue;
+    if (sw.watcher.toBase58() !== agentKeypair.publicKey.toBase58()) {
+      console.log(`[agent] Switch ${sw.switchId}: skipping — watcher ${sw.watcher.toBase58()} !== agent ${agentKeypair.publicKey.toBase58()}`);
+      continue;
+    }
 
     const result = evaluateTimeCondition(sw);
     console.log(`[agent] Switch ${sw.switchId}: ${result.reason}`);

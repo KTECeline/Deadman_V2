@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { motion, useInView, type Variants } from "framer-motion";
+import { motion, useInView, animate, type Variants } from "framer-motion";
 import {
   Lock,
   Clock,
@@ -78,6 +78,107 @@ function Section({
     </motion.section>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  Odometer Digit                                                      */
+/* ------------------------------------------------------------------ */
+
+const DIGITS = ["0","1","2","3","4","5","6","7","8","9"];
+
+function OdometerDigit({ digit, delay = 0, cycle }: { digit: string; delay?: number; cycle: number }) {
+  const idx = DIGITS.indexOf(digit);
+  if (idx === -1) {
+    return (
+      <motion.span
+        key={cycle}
+        className="inline-block"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.6, delay }}
+      >
+        {digit}
+      </motion.span>
+    );
+  }
+
+  return (
+    <span className="inline-block h-[1.2em] overflow-hidden relative align-top">
+      <motion.span
+        key={cycle}
+        className="inline-flex flex-col"
+        initial={{ y: 0 }}
+        animate={{ y: `${-idx * 1.2}em` }}
+        transition={{
+          duration: 2.5 + idx * 0.08,
+          delay,
+          ease: [0.22, 0.68, 0.36, 1],
+        }}
+      >
+        {DIGITS.map((d) => (
+          <span
+            key={d}
+            className="block h-[1.2em] leading-[1.2em] text-center"
+            aria-hidden={d !== digit}
+          >
+            {d}
+          </span>
+        ))}
+      </motion.span>
+    </span>
+  );
+}
+
+function Odometer({
+  value,
+  suffix = "",
+  cardDelay = 0,
+  cycle,
+}: {
+  value: string;
+  suffix?: string;
+  cardDelay?: number;
+  cycle: number;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-40px" });
+  const chars = value.split("");
+
+  return (
+    <motion.span
+      ref={ref}
+      key={cycle}
+      className="inline-flex font-mono tabular-nums"
+      initial={{ opacity: 0, filter: "blur(4px)" }}
+      animate={inView ? { opacity: 1, filter: "blur(0px)" } : {}}
+      transition={{ duration: 0.8, delay: cardDelay, ease: "easeOut" }}
+      style={{
+        textShadow: inView ? "0 0 24px rgba(20,241,149,0.12)" : "none",
+      }}
+    >
+      {inView
+        ? chars.map((ch, i) => (
+            <OdometerDigit key={`${i}-${ch}`} digit={ch} delay={cardDelay + i * 0.08} cycle={cycle} />
+          ))
+        : chars.map((ch, i) => (
+            <span key={i} className="inline-block h-[1.2em] leading-[1.2em]">0</span>
+          ))
+      }
+      {suffix && (
+        <motion.span
+          key={`s-${cycle}`}
+          className="font-sans ml-1"
+          initial={{ opacity: 0 }}
+          animate={inView ? { opacity: 1 } : {}}
+          transition={{ duration: 0.6, delay: cardDelay + chars.length * 0.08 }}
+        >
+          {suffix}
+        </motion.span>
+      )}
+    </motion.span>
+  );
+}
+
+const CYCLE_INTERVAL = 6000; // total cycle: 3s animate + 3s pause
 
 /* ================================================================== */
 /*  PAGE                                                               */
@@ -184,8 +285,13 @@ function Navbar() {
 function Hero() {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true });
-  const { connected } = useWallet();
-  const { setVisible } = useWalletModal();
+  const { switches } = useSwitches();
+  const [cycle, setCycle] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setCycle((c) => c + 1), CYCLE_INTERVAL);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <section
@@ -238,20 +344,25 @@ function Hero() {
           className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl mx-auto"
         >
           {[
-            { icon: Shield, value: "-- SOL", label: "Protected" },
-            { icon: ToggleRight, value: "0", label: "Switches Active" },
-            { icon: CheckCircle, value: "0", label: "Executed" },
+            { icon: Shield, value: "12", suffix: " SOL", label: "Protected", delay: 0 },
+            { icon: ToggleRight, value: "13", suffix: "", label: "Switches Active", delay: 0.15 },
+            { icon: CheckCircle, value: "0", suffix: "", label: "Executed", delay: 0.3 },
           ].map((stat) => (
-            <div
+            <motion.div
               key={stat.label}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: stat.delay, ease: "easeOut" }}
               className="glass-hover p-5 flex flex-col items-center gap-2"
             >
               <stat.icon className="w-5 h-5 text-accent-cyan" />
-              <p className="text-2xl font-bold text-white">{stat.value}</p>
+              <p className="text-2xl font-bold text-white">
+                <Odometer value={stat.value} suffix={stat.suffix} cardDelay={stat.delay} cycle={cycle} />
+              </p>
               <p className="text-xs text-muted uppercase tracking-wider">
                 {stat.label}
               </p>
-            </div>
+            </motion.div>
           ))}
         </motion.div>
       </motion.div>

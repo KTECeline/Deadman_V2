@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendWarning } from "../../../../agent/telegram";
-import { sendClaimEmail } from "../../../../agent/email";
+import { Resend } from "resend";
 
 export async function POST(req: NextRequest) {
   const { chatId, email } = await req.json();
@@ -8,8 +7,17 @@ export async function POST(req: NextRequest) {
 
   if (chatId) {
     try {
-      await sendWarning(chatId, "TEST123", 1, { amountSol: 0.5, beneficiaryName: "Test Beneficiary" });
-      results.telegram = "sent";
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: "⚠️ Test warning from DeadSwitch — your agent is live!",
+        }),
+      });
+      const data = await res.json();
+      results.telegram = data.ok ? "sent" : `error: ${JSON.stringify(data)}`;
     } catch (e: any) {
       results.telegram = `error: ${e.message}`;
     }
@@ -17,7 +25,13 @@ export async function POST(req: NextRequest) {
 
   if (email) {
     try {
-      await sendClaimEmail(email, "TestOwner", 0.5, "TESTCODE123");
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      await resend.emails.send({
+        from: process.env.RESEND_FROM_EMAIL ?? "notify@deadmansswitch.xyz",
+        to: email,
+        subject: "DeadSwitch test email",
+        text: "Test email from DeadSwitch — your notifications are working!",
+      });
       results.email = "sent";
     } catch (e: any) {
       results.email = `error: ${e.message}`;
